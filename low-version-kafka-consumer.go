@@ -11,8 +11,8 @@ import (
 	"github.com/wvanbergen/kazoo-go"
 )
 
-/*startLowVersionKafkaConsumer 启动低版本kafka消费组*/
-func startLowVersionKafkaConsumer(zookeeper, topics, groupID string, receiver chan *sarama.ConsumerMessage) {
+/*StartLowVersionKafkaConsumer 启动低版本kafka消费组*/
+func StartLowVersionKafkaConsumer(zookeeper, topics, groupID string, receiver chan *sarama.ConsumerMessage) {
 	var zookeeperNodes []string
 
 	consumerGroupConfig := consumergroup.NewConfig()
