@@ -1,6 +1,8 @@
 package kafka
 
 import (
+	"os"
+	"os/signal"
 	"strings"
 	"time"
 
@@ -12,23 +14,33 @@ import (
 )
 
 /*StartLowVersionKafkaConsumer 启动低版本kafka消费组*/
-func StartLowVersionKafkaConsumer(zookeeper, topics, groupID string, receiver chan *sarama.ConsumerMessage) {
+func StartLowVersionKafkaConsumer(zookeeper, topics, groupID string, interval int64, receiver chan *sarama.ConsumerMessage) {
 	var zookeeperNodes []string
 
-	consumerGroupConfig := consumergroup.NewConfig()
-	consumerGroupConfig.Offsets.Initial = sarama.OffsetNewest
+	config := consumergroup.NewConfig()
+	config.Offsets.ProcessingTimeout = 10 * time.Second
+	config.Offsets.Initial = sarama.OffsetNewest
+	config.Consumer.Offsets.AutoCommit.Enable = true
+	config.Consumer.Offsets.AutoCommit.Interval = time.Duration(interval) * time.Second
 
-	consumerGroupConfig.Offsets.ProcessingTimeout = 10 * time.Second
-
-	zookeeperNodes, consumerGroupConfig.Zookeeper.Chroot = kazoo.ParseConnectionString(zookeeper)
+	zookeeperNodes, config.Zookeeper.Chroot = kazoo.ParseConnectionString(zookeeper)
 	kafkaTopics := strings.Split(topics, ",")
 
-	consumer, err := consumergroup.JoinConsumerGroup(groupID, kafkaTopics, zookeeperNodes, consumerGroupConfig)
+	consumer, err := consumergroup.JoinConsumerGroup(groupID, kafkaTopics, zookeeperNodes, config)
 	if err != nil {
-		log.Fatal("创建Kafka消费者失败:%s", err)
+		log.Fatalf("创建Kafka消费者失败:%v", err)
 	}
 
 	log.Infof("Kafka消费者启动成功,groupID:%s,topics:%s", groupID, topics)
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		<-c
+		if err := consumer.Close(); err != nil {
+			log.Errorf("Error closing the consumer:%v", err)
+		}
+	}()
 
 	go func() {
 		for err := range consumer.Errors() {
@@ -38,6 +50,5 @@ func StartLowVersionKafkaConsumer(zookeeper, topics, groupID string, receiver ch
 
 	for message := range consumer.Messages() {
 		receiver <- message
-		consumer.CommitUpto(message)
 	}
 }

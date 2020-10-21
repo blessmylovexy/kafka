@@ -7,13 +7,14 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/Shopify/sarama"
 	"github.com/blessmylovexy/log"
 )
 
 /*StartHighVersionKafkaConsumer 启动高版本kafka消费组*/
-func StartHighVersionKafkaConsumer(brokers, version, topics, groupID string, receiver chan *sarama.ConsumerMessage) {
+func StartHighVersionKafkaConsumer(brokers, version, topics, groupID string, interval int64, receiver chan *sarama.ConsumerMessage) {
 
 	kafkaVersion, err := sarama.ParseKafkaVersion(version)
 	if err != nil {
@@ -24,6 +25,8 @@ func StartHighVersionKafkaConsumer(brokers, version, topics, groupID string, rec
 	config.Version = kafkaVersion
 	config.Consumer.Group.Rebalance.Strategy = sarama.BalanceStrategySticky
 	config.Consumer.Offsets.Initial = sarama.OffsetNewest
+	config.Consumer.Offsets.AutoCommit.Enable = true
+	config.Consumer.Offsets.AutoCommit.Interval = time.Duration(interval) * time.Second
 
 	// 创建一个新的消费者组
 	consumer := Consumer{
@@ -34,7 +37,7 @@ func StartHighVersionKafkaConsumer(brokers, version, topics, groupID string, rec
 	ctx, cancel := context.WithCancel(context.Background())
 	client, err := sarama.NewConsumerGroup(strings.Split(brokers, ","), groupID, config)
 	if err != nil {
-		log.Panicf("创建Kafka客户端失败: %v", err)
+		log.Panicf("创建Kafka客户端失败:%v", err)
 	}
 
 	wg := &sync.WaitGroup{}
@@ -44,7 +47,7 @@ func StartHighVersionKafkaConsumer(brokers, version, topics, groupID string, rec
 		for {
 			// 需要在循环内调用Consume, 当server端发生rebalance时,将需要重新创建消费者。
 			if err := client.Consume(ctx, strings.Split(topics, ","), &consumer); err != nil {
-				log.Panicf("创建Kafka消费者失败: %v", err)
+				log.Panicf("创建Kafka消费者失败:%v", err)
 			}
 			// 关闭ctx时停止消费
 			if ctx.Err() != nil {
@@ -69,7 +72,7 @@ func StartHighVersionKafkaConsumer(brokers, version, topics, groupID string, rec
 	cancel()
 	wg.Wait()
 	if err = client.Close(); err != nil {
-		log.Panicf("关闭Kafka客户端失败: %v", err)
+		log.Panicf("关闭Kafka客户端失败:%v", err)
 	}
 }
 
@@ -94,7 +97,6 @@ func (consumer *Consumer) Cleanup(sarama.ConsumerGroupSession) error {
 func (consumer *Consumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	for message := range claim.Messages() {
 		consumer.msg <- message
-		session.MarkMessage(message, "")
 	}
 	return nil
 }
